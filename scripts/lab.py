@@ -113,7 +113,11 @@ def check(session, config):
             ActionNames=["bedrock:InvokeModel"],
             ResourceArns=resources,
         )["EvaluationResults"]
-        decisions = {r["EvalResourceName"]: r["EvalDecision"] for r in result}
+        decisions = {
+            resource["EvalResourceName"]: resource["EvalResourceDecision"]
+            for evaluation in result
+            for resource in evaluation["ResourceSpecificResults"]
+        }
         if decisions.get(resources[0]) != "allowed" or decisions.get(resources[1]) == "allowed":
             raise RuntimeError(f"{name}: unexpected Runtime permissions {decisions}")
         for model, expected in [(config["mantle_model_id"], "allowed"), ("openai.gpt-oss-120b", "implicitDeny")]:

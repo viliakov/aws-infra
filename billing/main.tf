@@ -86,29 +86,9 @@ data "aws_iam_policy_document" "reports" {
   }
 
   statement {
-    sid       = "ExportBucketChecks"
-    actions   = ["s3:GetBucketAcl", "s3:GetBucketPolicy"]
-    resources = [module.reports.arn]
-    principals {
-      type        = "Service"
-      identifiers = ["bcm-data-exports.amazonaws.com"]
-    }
-    condition {
-      test     = "StringEquals"
-      variable = "aws:SourceAccount"
-      values   = [var.management_account_id]
-    }
-    condition {
-      test     = "ArnLike"
-      variable = "aws:SourceArn"
-      values   = ["arn:aws:bcm-data-exports:us-east-1:${var.management_account_id}:export/*"]
-    }
-  }
-
-  statement {
     sid       = "ExportDelivery"
     actions   = ["s3:PutObject"]
-    resources = ["${module.reports.arn}/cur/*"]
+    resources = ["${module.reports.arn}/*"]
     principals {
       type        = "Service"
       identifiers = ["bcm-data-exports.amazonaws.com"]
