@@ -57,6 +57,24 @@ class ReportingTests(unittest.TestCase):
         result = self.summarize([self.row(line_item_usage_start_date="2026-09-17T11:00:00+02:00")])
         self.assertEqual(len(result["groups"]), 1)
 
+    def test_caller_verification_accepts_assumed_roles_but_rejects_wrong_tags(self):
+        config = {
+            "member_account_id": "123456789012",
+            "callers": {
+                "test": {
+                    "arn": "arn:aws:iam::123456789012:role/test",
+                    "tags": {"owner": "alice", "product": "lab"},
+                }
+            },
+        }
+        result = self.summarize([
+            self.row(line_item_iam_principal="arn:aws:sts::123456789012:assumed-role/test/session")
+        ])
+        self.assertEqual(report.verify_callers(result, config), [])
+        result["groups"][0]["owner"] = "bob"
+        self.assertEqual(len(report.verify_callers(result, config)), 1)
+        self.assertEqual(len(report.verify_callers({"groups": []}, config)), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

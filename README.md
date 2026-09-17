@@ -7,6 +7,8 @@ and state, and an existing member account runs the inference tests.
 The experiment supports [StackVista/terraform-infra#126](https://github.com/StackVista/terraform-infra/issues/126).
 Its synthetic tags are local test values, not a proposed company taxonomy.
 
+[Deployment evidence and pending billing checks](docs/validation-2026-09-17.md).
+
 ## Layout
 
 | Directory | Managed resources |
