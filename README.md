@@ -9,6 +9,7 @@ Its synthetic tags are local test values, not a proposed company taxonomy.
 
 [Deployment evidence and pending billing checks](docs/validation-2026-09-17.md).
 [Verified IAM-principal activation](docs/activation-2026-09-18.md).
+[Verified member-account console access](docs/console-access-2026-09-18.md).
 
 ## Layout
 
