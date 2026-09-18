@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--management-account-id", required=True)
     parser.add_argument("--member-account-id", required=True)
     parser.add_argument("--region", default="eu-central-1")
+    parser.add_argument("--console-user-name", default="vl.iliakov")
     args = parser.parse_args()
     if not args.region.startswith("eu-"):
         parser.error("This lab keeps inference and storage in Europe.")
@@ -56,6 +57,11 @@ def main():
         },
         "bedrock-lab": {**common, "member_account_id": args.member_account_id},
         "billing-tags": {"management_account_id": args.management_account_id},
+        "account-access": {
+            **common,
+            "member_account_id": args.member_account_id,
+            "console_user_name": args.console_user_name,
+        },
     }
     bucket = f"aws-infra-state-{args.management_account_id}-{args.region}"
     for name, variables in values.items():

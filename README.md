@@ -15,6 +15,7 @@ Its synthetic tags are local test values, not a proposed company taxonomy.
 | Directory | Managed resources |
 | --- | --- |
 | `bootstrap/` | Encrypted, versioned S3 state bucket and TLS policy |
+| `account-access/` | Member-account Administrator role and the source user's grant to assume both admin roles |
 | `billing/` | Private EU report bucket, hourly CUR 2.0 export, member-account budget |
 | `bedrock-lab/` | Four assumable IAM roles and model-scoped inference policies |
 | `billing-tags/` | Two IAM-principal tag activations, only if exposed by the billing API |
@@ -110,6 +111,37 @@ Responses call for each role:
 | `bob-a` | `lab-bob` | `lab-product-a` |
 | `alice-b` | `lab-alice` | `lab-product-b` |
 | `untagged` | absent | absent |
+
+## Console access to the member account
+
+The `account-access/` root grants the existing management-account IAM user
+`vl.iliakov` permission to assume exactly these member-account roles:
+`OrganizationAccountAccessRole` and `Administrator`. The latter is created with
+the AWS-managed `AdministratorAccess` policy and trusts only that IAM user.
+The existing organization access role is read as a data source.
+
+After configuring inputs and bootstrapping state, apply:
+
+```bash
+terraform -chdir=account-access init -backend-config=local.backend.hcl
+terraform -chdir=account-access plan -out=access.tfplan
+terraform -chdir=account-access apply access.tfplan
+```
+
+If `Administrator` already exists in another account where this configuration
+is reused, inspect its owner, trust and permissions, and prepare an explicit
+import before applying. Override `--console-user-name` when preparing inputs
+for another IAM user.
+
+Sign in to the management account as the IAM user, then choose **Switch role**
+from the account menu. Enter the member account ID and either role name above.
+Root users cannot switch roles. The console authorizes against the original
+signed-in identity, which is why this user grant is required even when the CLI
+already works through the management `Administrator` role.
+
+This root has its own state and survives cleanup of `bedrock-lab/`.
+
+## Request limits
 
 Each request permits at most 128 output tokens. The local ledger permits at most
 24 attempted inference requests per UTC day, including failed and interrupted
@@ -217,7 +249,7 @@ Run `terraform validate` in each initialized root, then inspect plans. After
 apply, run another plan to check for drift.
 
 Destroy only `bedrock-lab/` after the billing experiment. This removes its four
-roles and inline policies. Retain `billing/`, `bootstrap/`, and tag activation
+roles and inline policies. Retain `account-access/`, `billing/`, `bootstrap/`, and tag activation
 state until the evidence is no longer needed. Buckets reject destruction in
 Terraform and cannot be force-emptied. The organization, accounts, and default
 Mantle project are never destroyed by this repository.
