@@ -14,9 +14,9 @@ variable "management_account_id" {
 }
 
 variable "principal_tag_api_keys" {
-  description = "Exact IAM-principal keys observed in ListCostAllocationTags; leave empty if the API does not expose them."
+  description = "Verified IAM-principal API keys. Apply this root only after both keys appear in ListCostAllocationTags."
   type        = set(string)
-  default     = []
+  default     = ["iamPrincipal/owner", "iamPrincipal/product"]
   validation {
     condition = alltrue([
       for key in var.principal_tag_api_keys :

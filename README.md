@@ -8,6 +8,7 @@ The experiment supports [StackVista/terraform-infra#126](https://github.com/Stac
 Its synthetic tags are local test values, not a proposed company taxonomy.
 
 [Deployment evidence and pending billing checks](docs/validation-2026-09-17.md).
+[Verified IAM-principal activation](docs/activation-2026-09-18.md).
 
 ## Layout
 
@@ -126,24 +127,27 @@ uv run scripts/lab.py tags
 ```
 
 Resource `owner`/`product` activation does not activate IAM-principal tags.
-The current Terraform resource only accepts a tag key and status, without a
-principal-category selector. Do not guess an API representation from a display
-label. If `ListCostAllocationTags` actually returns the exact keys
-`iamPrincipal/owner` and `iamPrincipal/product`, set:
+The live API exposed the exact keys `iamPrincipal/owner` and
+`iamPrincipal/product` on 18 September 2026. The activation root now declares
+both by default. For a new account, wait until both keys are discoverable before
+applying this root:
 
-```hcl
-principal_tag_api_keys = ["iamPrincipal/owner", "iamPrincipal/product"]
+```bash
+terraform -chdir=billing-tags init -backend-config=local.backend.hcl
+terraform -chdir=billing-tags plan -out=activation.tfplan
+terraform -chdir=billing-tags apply activation.tfplan
+uv run scripts/lab.py tags
 ```
 
-in an ignored file under `billing-tags/`, then initialize, plan, apply, and
-independently re-read their status. The provider may not surface individual tag
+Independently re-read their status. The provider may not surface individual tag
 errors returned inside an HTTP 200 response, so apply success alone is insufficient.
 If activation already happened outside Terraform, import the exact verified keys
 before managing them.
 
-If the API does not expose those keys, activate **owner** and **product** in
+If another account's API does not expose those keys, activate **owner** and **product** in
 **Billing → Cost allocation tags → IAM principal**. Record the UTC activation
-time. Leave `billing-tags/` empty; do not activate similarly named Resource tags
+time. Override `principal_tag_api_keys = []` before first applying that root;
+do not activate similarly named Resource tags
 as a substitute.
 
 ## Acceptance and reporting
