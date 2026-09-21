@@ -110,6 +110,7 @@ output "test_config" {
     runtime_model_id      = local.runtime_model_id
     mantle_model_id       = local.mantle_model_id
     mantle_project_id     = "default"
+    session_tag_callers   = local.session_tag_callers
     callers = {
       for key, role in aws_iam_role.caller : key => {
         arn  = role.arn

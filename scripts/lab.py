@@ -48,9 +48,12 @@ def append_event(event, *, reserve=False):
         os.fsync(f.fileno())
 
 
-def assume(session, arn, name):
+def assume(session, arn, name, session_tags=None):
+    options = {}
+    if session_tags:
+        options["Tags"] = [{"Key": key, "Value": value} for key, value in sorted(session_tags.items())]
     credentials = session.client("sts", config=CLIENT_CONFIG).assume_role(
-        RoleArn=arn, RoleSessionName=name, DurationSeconds=900
+        RoleArn=arn, RoleSessionName=name, DurationSeconds=900, **options
     )["Credentials"]
     return boto3.Session(
         aws_access_key_id=credentials["AccessKeyId"],
@@ -99,7 +102,8 @@ def check(session, config):
         "cost-lab-readonly",
     )
     iam = member.client("iam")
-    for key, caller in config["callers"].items():
+    callers = {**config["callers"], **config.get("session_tag_callers", {})}
+    for key, caller in callers.items():
         name = caller["arn"].rsplit("/", 1)[-1]
         tags = {t["Key"]: t["Value"] for t in iam.list_role_tags(RoleName=name)["Tags"]}
         if tags != caller["tags"]:
@@ -141,7 +145,7 @@ def check(session, config):
 
 def invoke(session, config, args):
     if args.phase == "acceptance":
-        if args.endpoint == "both":
+        if args.endpoint == "both" and not args.session_tags:
             raise RuntimeError("Use separate UTC billing hours for Runtime and Mantle acceptance.")
         try:
             active = principal_tags_active(billing_tags(session))
@@ -153,17 +157,25 @@ def invoke(session, config, args):
             raise RuntimeError("Activate IAM-principal tags first; discovery calls remain available.")
     failures = 0
     run_id = uuid.uuid4().hex[:12]
-    for key, caller in sorted(config["callers"].items()):
-        role_session = assume(session, caller["arn"], f"cost-lab-{args.phase}-{run_id}")
-        identity = role_session.client("sts", config=CLIENT_CONFIG).get_caller_identity()
-        if identity["Account"] != config["member_account_id"]:
-            raise RuntimeError("Wrong invocation account.")
+    print(f"Run ID: {run_id}", flush=True)
+    callers = config["session_tag_callers"] if args.session_tags else config["callers"]
+    for key, caller in sorted(callers.items()):
         endpoints = ["runtime", "mantle"] if args.endpoint == "both" else [args.endpoint]
         for endpoint in endpoints:
+            session_tags = caller.get("session_tags", {})
+            role_session = assume(
+                session, caller["arn"], f"cost-lab-{run_id}-{key}-{endpoint}", session_tags
+            )
+            identity = role_session.client("sts", config=CLIENT_CONFIG).get_caller_identity()
+            if identity["Account"] != config["member_account_id"]:
+                raise RuntimeError("Wrong invocation account.")
             event = {
                 "event": "attempt", "at": now(), "id": uuid.uuid4().hex,
                 "run_id": run_id, "phase": args.phase, "caller": key,
-                "caller_arn": identity["Arn"], "tags": caller["tags"],
+                "caller_arn": identity["Arn"],
+                "tags": {**caller["tags"], **session_tags},
+                "role_tags": caller["tags"], "session_tags": session_tags,
+                "experiment": "session-tags" if args.session_tags else "role-tags",
                 "region": config["region"], "endpoint": endpoint,
                 "model": config[f"{endpoint}_model_id"],
                 "max_output_tokens": MAX_OUTPUT_TOKENS,
@@ -217,6 +229,8 @@ def main():
     call = sub.add_parser("invoke")
     call.add_argument("--phase", choices=["discovery", "acceptance"], required=True)
     call.add_argument("--endpoint", choices=["runtime", "mantle", "both"], default="both")
+    call.add_argument("--session-tags", action="store_true",
+                      help="Test two tagged sessions of one untagged role, plus untagged and static controls.")
     call.add_argument("--console-activation-confirmed", action="store_true",
                       help="Use only after confirming both IAM-principal tags are Active in the payer console.")
     args = parser.parse_args()

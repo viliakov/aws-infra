@@ -107,6 +107,50 @@ def verify_callers(report, config):
     return missing
 
 
+def verify_session_run(report, config, events, run_id):
+    errors = []
+    attempts = [
+        event for event in events
+        if event.get("run_id") == run_id and event.get("event") == "attempt"
+        and event.get("experiment") == "session-tags"
+    ]
+    successful = {
+        event["id"] for event in events
+        if event.get("run_id") == run_id and event.get("event") == "result" and event.get("ok")
+    }
+    seen_principals = set()
+    for key, caller in config["session_tag_callers"].items():
+        expected_tags = {**caller["tags"], **caller["session_tags"]}
+        role_name = caller["arn"].rsplit("/", 1)[-1]
+        prefix = f"arn:aws:sts::{config['member_account_id']}:assumed-role/{role_name}/"
+        for endpoint in ("runtime", "mantle"):
+            label = f"{key}/{endpoint}"
+            matches = [e for e in attempts if e["caller"] == key and e["endpoint"] == endpoint]
+            if len(matches) != 1 or matches[0]["id"] not in successful:
+                errors.append(f"{label}: expected one successful recorded invocation")
+                continue
+            event = matches[0]
+            principal = event["caller_arn"]
+            if (
+                not principal.startswith(prefix) or principal in seen_principals
+                or event["role_tags"] != caller["tags"]
+                or event["session_tags"] != caller["session_tags"]
+            ):
+                errors.append(f"{label}: ledger identity or tags do not match the experiment")
+                continue
+            seen_principals.add(principal)
+            rows = [row for row in report["groups"] if row["principal"] == principal]
+            if not rows or not any(Decimal(row["usage"]) > 0 for row in rows):
+                errors.append(f"{label}: no delivered usage for the exact session ARN")
+            elif any(
+                row["owner"] != expected_tags.get("owner", "")
+                or row["product"] != expected_tags.get("product", "")
+                for row in rows
+            ):
+                errors.append(f"{label}: billed tags differ from expected session/static tags")
+    return errors
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--profile", default="personal-administrator")
@@ -116,6 +160,9 @@ def main():
     parser.add_argument("--end", required=True, help="UTC billing-hour boundary, exclusive")
     parser.add_argument("--verify-callers", action="store_true",
                         help="Fail unless all four expected caller/tag combinations have delivered usage.")
+    parser.add_argument("--verify-session-run", metavar="RUN_ID",
+                        help="Verify all eight session-tag test calls by their exact session ARNs.")
+    parser.add_argument("--ledger", type=Path, default=ROOT / "artifacts/invocations.jsonl")
     args = parser.parse_args()
     config = json.loads(args.config.read_text())
     start, end = timestamp(args.start), timestamp(args.end)
@@ -130,11 +177,17 @@ def main():
     )
     if args.verify_callers:
         report["caller_validation_errors"] = verify_callers(report, config)
+    if args.verify_session_run:
+        events = [json.loads(line) for line in args.ledger.read_text().splitlines() if line.strip()]
+        report["session_tag_run"] = args.verify_session_run
+        report["session_tag_validation_errors"] = verify_session_run(
+            report, config, events, args.verify_session_run
+        )
     print(json.dumps(report, indent=2))
     if not report["groups"]:
         print("No billing rows in the selected interval yet.", file=sys.stderr)
         return 2
-    if report.get("caller_validation_errors"):
+    if report.get("caller_validation_errors") or report.get("session_tag_validation_errors"):
         return 2
     return 0
 

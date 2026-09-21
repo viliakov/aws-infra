@@ -10,6 +10,7 @@ Its synthetic tags are local test values, not a proposed company taxonomy.
 [Deployment evidence and pending billing checks](docs/validation-2026-09-17.md).
 [Verified IAM-principal activation](docs/activation-2026-09-18.md).
 [Verified member-account console access](docs/console-access-2026-09-18.md).
+[Session-tag experiment and pending billing verification](docs/session-tags-2026-09-21.md).
 
 ## Layout
 
@@ -18,7 +19,7 @@ Its synthetic tags are local test values, not a proposed company taxonomy.
 | `bootstrap/` | Encrypted, versioned S3 state bucket and TLS policy |
 | `account-access/` | Member-account Administrator role and the source user's grant to assume both admin roles |
 | `billing/` | Private EU report bucket, hourly CUR 2.0 export, member-account budget |
-| `bedrock-lab/` | Four assumable IAM roles and model-scoped inference policies |
+| `bedrock-lab/` | Four role-tag callers and one shared session-tag caller, with model-scoped inference policies |
 | `billing-tags/` | Two IAM-principal tag activations, only if exposed by the billing API |
 | `scripts/` | Configuration, bounded inference tests, billing inspection |
 | `tests/` | Request-budget and financial aggregation checks |
@@ -239,6 +240,49 @@ Acceptance requires delivered billing data, not just successful requests:
 Allow several days for discovery, activation, and export delivery. No scheduled
 inference loop is created.
 
+## Session-tag billing experiment
+
+The shared `bedrock-cost-lab-session` role has **no static tags**. Two sessions
+receive synthetic `owner` and `product` values directly in the STS request;
+a third receives no tags. A fourth caller uses the original statically tagged
+Alice role as a control. This tests session-tag billing independently of an
+identity provider. It does not provision SSO or test tag propagation.
+
+Apply the updated `bedrock-lab/` plan and refresh its output first:
+
+```bash
+terraform -chdir=bedrock-lab output -json test_config > artifacts/test-config.json
+uv run scripts/lab.py check
+uv run scripts/lab.py invoke --phase acceptance --session-tags --endpoint both
+```
+
+| Case | Static role tags | Session tags |
+| --- | --- | --- |
+| `session-alice` | None | `owner=lab-session-alice`, `product=lab-session-product-a` |
+| `session-bob` | None | `owner=lab-session-bob`, `product=lab-session-product-b` |
+| `session-untagged` | None | None |
+| `static-control` | `owner=lab-alice`, `product=lab-product-a` | None |
+
+The run makes eight calls, four per endpoint, under the existing daily cap.
+Every case/endpoint gets a unique session ARN recorded in the ledger, allowing
+both endpoints to run in one billing hour. Both principal keys must already be
+active. The role trust permits only the synthetic session tag keys and values.
+
+Once CUR data arrives, use the printed run ID and its UTC billing-hour interval:
+
+```bash
+uv run scripts/report.py --bucket "$REPORT_BUCKET" \
+  --start START_UTC_HOUR --end END_UTC_HOUR \
+  --verify-session-run RUN_ID > artifacts/session-billing-summary.json
+```
+
+Verification requires all eight successful calls, each exact session ARN, and
+the expected tags on positive billed usage. Missing rows return exit code 2;
+they are not evidence that session tags are unsupported. If static control
+attribution works but delivered session-only calls have blank principal tags,
+record that difference and investigate it with AWS before promising SSO-based
+billing. A successful STS or Bedrock call alone does not prove billing support.
+
 ## Checks and cleanup
 
 ```bash
@@ -249,7 +293,7 @@ uv run python -m unittest discover -s tests -v
 Run `terraform validate` in each initialized root, then inspect plans. After
 apply, run another plan to check for drift.
 
-Destroy only `bedrock-lab/` after the billing experiment. This removes its four
+Destroy only `bedrock-lab/` after the billing experiment. This removes its five
 roles and inline policies. Retain `account-access/`, `billing/`, `bootstrap/`, and tag activation
 state until the evidence is no longer needed. Buckets reject destruction in
 Terraform and cannot be force-emptied. The organization, accounts, and default
