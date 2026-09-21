@@ -12,9 +12,9 @@ test access in the member account. All three users share that permission set.
 - `users.json` is the shared synthetic user inventory. Terraform provisions
   matching Identity Center user records; Keycloak holds passwords and the
   authoritative `owner`/`product` attributes.
-- `../scripts/sso_idp.py` prepares and runs local Keycloak, configures users and
-  SAML mappings, verifies signed login responses, and generates isolated CLI
-  profiles.
+- `../scripts/sso_idp.py` downloads sandbox metadata, verifies signed login
+  responses, and generates isolated CLI profiles. Realm administration belongs
+  to `terraform-infra/keycloak/sandbox-main`.
 - `../sso-lab/` owns the Identity Center users, permission set, model-scoped
   policy, attribute configuration, and member-account assignments in Terraform.
 - `../scripts/sso_probe.py` makes bounded inference calls with an existing SSO
@@ -37,66 +37,56 @@ one directory mapping. Keeping that key distinct preserves `owner`/`product`
 from the SAML assertion. `labSubject` is not activated for cost allocation.
 The control user has no owner/product attribution, although it has `labSubject`.
 
-## Start and verify the local identity provider
+## Prepare and verify sandbox Keycloak
 
-Run from the repository root:
+The active IdP is the separate `bedrock-cost-lab` realm at
+`https://sso.sandbox-main.sandbox.stackstate.io`. Its users, attributes, SAML
+clients and permissions are managed through Terraform in
+[terraform-infra](https://github.com/StackVista/terraform-infra/pull/127).
+The helper uses normal HTTPS certificate validation and only submits login forms.
+It has no Docker commands or Keycloak administration calls.
+
+Obtain the encrypted password file from the applied Terraform revision, then run
+from this repository root with credentials allowed to decrypt its SOPS/KMS key:
 
 ```bash
 uv sync --locked
-uv run scripts/sso_idp.py prepare
-uv run scripts/sso_idp.py build
-uv run scripts/sso_idp.py start
-```
-
-Allow Keycloak startup to finish, then run:
-
-```bash
-uv run scripts/sso_idp.py configure
+AWS_PROFILE=stackstate-infosec uv run scripts/sso_idp.py prepare \
+  --passwords-sops /path/to/terraform-infra/keycloak/sandbox-main/secrets/sops.bedrock_cost_lab_passwords.json
+uv run scripts/sso_idp.py configure \
+  --sp-metadata artifacts/sso-idp/aws-sp-metadata.xml
 uv run scripts/sso_idp.py verify-logins
 ```
 
-The test performs actual password logins for all three users. It checks the
-signed response against the metadata certificate, verifies issuer, audience,
-NameID and attribute values, and saves only the non-secret result. It does not
-save SAML assertions or tokens.
+`prepare` stores the sandbox passwords in an ignored, mode-600 file and prepares
+SSO Terraform inputs. It does not generate new passwords or reuse the old Docker
+credentials. Once prepared, subsequent verification needs no KMS credentials.
 
-The IdP runs at `https://bedrock-idp.127.0.0.1.sslip.io:8843`, published on the
-host's loopback address only. This full DNS hostname replaces `localhost`, which
-was advertised by the metadata rejected by AWS with a URL-validation error.
-AWS acceptance of the replacement metadata must be checked in the console.
+`configure` downloads the realm's public metadata. Its name is retained for
+existing commands, but it does not modify Keycloak. An optional `--sp-metadata`
+records the AWS metadata used for client verification; update the owning
+Terraform configuration if AWS's entity ID or ACS URLs change.
 
-The hostname resolves to `127.0.0.1` through sslip.io. If your resolver blocks
-loopback DNS responses, add the following entry to `/etc/hosts` on the machine
-running both Keycloak and the browser:
+`verify-logins` performs password logins for all three users. It verifies signed
+issuer, destination, audience, NameID, assertion lifetime and exact attributes.
+When AWS SP metadata is present, both preview and AWS clients are checked (six
+logins); otherwise only preview is checked. It captures SAML forms without
+submitting them to AWS, so this does not establish an AWS session or prove billing.
 
-```text
-127.0.0.1 bedrock-idp.127.0.0.1.sslip.io
-```
+Private local files remain under ignored `artifacts/sso-idp/`:
 
-It uses a generated TLS certificate for that hostname. For browser testing,
-trust this lab certificate or accept its local certificate warning. The scripts
-connect directly to loopback and validate the certificate and hostname;
-verification is not disabled. Keep Keycloak running during AWS login.
+- `sandbox-passwords.json`: the three sandbox passwords, keyed by user name.
+- `idp-metadata.xml`: sandbox metadata to upload to AWS.
+- `idp-metadata.previous.xml`: previous issuer metadata preserved during migration.
+- `aws-sp-metadata.xml`: the personal AWS lab's service-provider metadata.
+- `aws-config`: isolated AWS CLI profiles; the portal URL is unchanged by migration.
+- `login-verification.json`: sanitized sandbox login evidence.
 
-To migrate an existing localhost setup, rerun `prepare`, `start`, `configure`,
-and `verify-logins`. `prepare` replaces a mismatched or expiring TLS certificate.
-`start` recreates only the lab container when its hostname or certificate changes,
-preserving its database, user passwords and SAML signing keys. Re-upload the
-newly generated metadata to AWS. If an AWS client was already configured, pass
-`--sp-metadata artifacts/sso-idp/aws-sp-metadata.xml` to `configure` again.
-
-Private local files are under ignored `artifacts/sso-idp/`:
-
-- `credentials.json`: generated administrator and test-user passwords.
-- `idp-metadata.xml`: the IdP metadata to upload to AWS.
-- `tls.crt` / `tls.key`: local IdP TLS certificate and private key.
-- `data/`: persistent Keycloak database, including its signing keys.
-- `login-verification.json`: sanitized local login evidence.
-
-The Docker image uses a digest-pinned SUSE BCI OpenJDK base. The Keycloak archive
-is verified against the SHA256 digest published with its upstream release.
-The current base digest targets Linux amd64. This is a local development IdP,
-with a file-backed database and a 2 GiB container memory limit.
+The sandbox issuer and signing certificate differ from the Docker IdP. In the
+personal lab's IAM Identity Center, replace the external IdP metadata with the
+new `idp-metadata.xml` before testing normal AWS login. Use the sandbox passwords
+for these logins. The old `credentials.json`, TLS files and Docker database are
+not used by the helper.
 
 ## Required AWS console setup
 
@@ -120,7 +110,7 @@ In the **personal management account**, select **Frankfurt (`eu-central-1`)**:
 
 No passwords or private signing keys need to be uploaded to AWS.
 
-Connect Keycloak to the AWS service provider:
+Download IdP metadata and record the AWS service provider for verification:
 
 ```bash
 uv run scripts/sso_idp.py configure \
@@ -128,8 +118,8 @@ uv run scripts/sso_idp.py configure \
 uv run scripts/sso_idp.py profiles --start-url YOUR_AWS_ACCESS_PORTAL_URL
 ```
 
-This configures the AWS SAML client using the actual AWS entity ID and assertion
-consumer URL. The local preview client is only for assertion testing.
+The sandbox AWS client is already managed by Terraform. Verification compares
+its signed responses with the supplied AWS entity ID and assertion-consumer URLs.
 
 The profile generator accepts both legacy `https://your-company.awsapps.com/start`
 URLs and dual-stack `https://ssoins-INSTANCE.portal.REGION.app.aws` URLs.
@@ -159,7 +149,7 @@ this root, inspect it and prepare an import rather than replacing it.
 ## Validate normal SSO login
 
 Open a separate private browser session for each user so an existing login does
-not silently select the previous user. Use the generated credentials locally.
+not silently select the previous user. Use the sandbox passwords stored locally.
 
 ```bash
 AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
@@ -190,18 +180,19 @@ ARNs and `iamPrincipal/owner` / `iamPrincipal/product` values. The existing
 these SSO logins. Successful login and inference do not prove billed attribution;
 wait for delivered CUR data.
 
-## Stopping and cleanup
+## Cleanup
 
-Stop the local IdP without deleting its database:
+Once AWS login uses sandbox Keycloak, the previous Docker IdP can be stopped:
 
 ```bash
 docker --config .tools/docker stop bedrock-cost-lab-idp
 ```
 
-Restart it with `uv run scripts/sso_idp.py start`. Destroying `sso-lab/` removes
-only that root's users, assignments, permission set/policy and attribute
-configuration. The console-created Identity Center instance and its external
-IdP connection remain for explicit cleanup after testing.
+Deleting this personal lab's `sso-lab/` resources does not delete the shared
+Keycloak realm. Remove that realm through its owning Terraform project and
+reviewed Atlantis workflow. Its runbook includes the required user-profile
+removal step for the pinned provider. The console-created Identity Center
+instance and its external IdP connection need separate explicit cleanup.
 
 ## References
 
@@ -212,5 +203,3 @@ IdP connection remain for explicit cleanup after testing.
 - [Enable attributes for access control](https://docs.aws.amazon.com/singlesignon/latest/userguide/configure-abac.html)
 - [SAML attribute mappings](https://docs.aws.amazon.com/singlesignon/latest/userguide/attributesforaccesscontrol.html)
 - [AWS CLI SSO configuration and dual-stack portal URLs](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html)
-- [Keycloak container setup](https://www.keycloak.org/server/containers)
-- [Keycloak release and published archive digest](https://github.com/keycloak/keycloak/releases/tag/26.7.4)

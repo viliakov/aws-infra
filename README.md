@@ -11,7 +11,8 @@ Its synthetic tags are local test values, not a proposed company taxonomy.
 [Verified IAM-principal activation](docs/activation-2026-09-18.md).
 [Verified member-account console access](docs/console-access-2026-09-18.md).
 [Session-tag experiment and pending billing verification](docs/session-tags-2026-09-21.md).
-[Automatic SAML SSO attribute lab](sso-idp/README.md).
+[Automatic SAML SSO attribute lab](sso-idp/README.md), using the Terraform-managed
+sandbox Keycloak realm.
 
 ## Layout
 
