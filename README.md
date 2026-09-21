@@ -11,6 +11,7 @@ Its synthetic tags are local test values, not a proposed company taxonomy.
 [Verified IAM-principal activation](docs/activation-2026-09-18.md).
 [Verified member-account console access](docs/console-access-2026-09-18.md).
 [Session-tag experiment and pending billing verification](docs/session-tags-2026-09-21.md).
+[Automatic SAML SSO attribute lab](sso-idp/README.md).
 
 ## Layout
 
@@ -21,6 +22,8 @@ Its synthetic tags are local test values, not a proposed company taxonomy.
 | `billing/` | Private EU report bucket, hourly CUR 2.0 export, member-account budget |
 | `bedrock-lab/` | Four role-tag callers and one shared session-tag caller, with model-scoped inference policies |
 | `billing-tags/` | Two IAM-principal tag activations, only if exposed by the billing API |
+| `sso-lab/` | Identity Center users, bounded permission set, attribute configuration, and account assignments |
+| `sso-idp/` | Local Keycloak test identity provider and synthetic user inventory |
 | `scripts/` | Configuration, bounded inference tests, billing inspection |
 | `tests/` | Request-budget and financial aggregation checks |
 

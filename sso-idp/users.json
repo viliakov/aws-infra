@@ -1,0 +1,26 @@
+{
+  "alice": {
+    "username": "alice@bedrock-cost-lab.invalid",
+    "given_name": "Alice",
+    "family_name": "Lab",
+    "attributes": {
+      "owner": "lab-sso-alice",
+      "product": "lab-sso-product-a"
+    }
+  },
+  "bob": {
+    "username": "bob@bedrock-cost-lab.invalid",
+    "given_name": "Bob",
+    "family_name": "Lab",
+    "attributes": {
+      "owner": "lab-sso-bob",
+      "product": "lab-sso-product-b"
+    }
+  },
+  "untagged": {
+    "username": "untagged@bedrock-cost-lab.invalid",
+    "given_name": "Untagged",
+    "family_name": "Lab",
+    "attributes": {}
+  }
+}
