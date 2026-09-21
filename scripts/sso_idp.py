@@ -9,6 +9,7 @@ import http.cookiejar
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import socket
@@ -350,9 +351,15 @@ def verify_logins():
 
 def profiles(start_url):
     url = urllib.parse.urlparse(start_url)
+    hostname = url.hostname or ""
+    portal_host = hostname.endswith(".awsapps.com") or re.fullmatch(
+        r"ssoins-[0-9a-f]{16}\.portal\.[a-z0-9-]+\.app\.aws", hostname
+    )
     if (
-        url.scheme != "https" or not (url.hostname or "").endswith(".awsapps.com")
-        or "\n" in start_url or "\r" in start_url
+        url.scheme != "https" or not portal_host
+        or url.username is not None or url.password is not None
+        or url.port not in (None, 443)
+        or any(character.isspace() or ord(character) < 32 for character in start_url)
     ):
         raise ValueError("Use the HTTPS AWS access portal URL shown by Identity Center.")
     config = json.loads((ROOT / "artifacts/test-config.json").read_text())

@@ -131,6 +131,10 @@ uv run scripts/sso_idp.py profiles --start-url YOUR_AWS_ACCESS_PORTAL_URL
 This configures the AWS SAML client using the actual AWS entity ID and assertion
 consumer URL. The local preview client is only for assertion testing.
 
+The profile generator accepts both legacy `https://your-company.awsapps.com/start`
+URLs and dual-stack `https://ssoins-INSTANCE.portal.REGION.app.aws` URLs.
+Use the portal URL displayed by your instance without changing its hostname.
+
 ## Apply AWS permissions through Terraform
 
 `prepare` generates the new root's ignored inputs and its own backend key using
@@ -207,5 +211,6 @@ IdP connection remain for explicit cleanup after testing.
 - [Change the identity source](https://docs.aws.amazon.com/singlesignon/latest/userguide/manage-your-identity-source-change.html)
 - [Enable attributes for access control](https://docs.aws.amazon.com/singlesignon/latest/userguide/configure-abac.html)
 - [SAML attribute mappings](https://docs.aws.amazon.com/singlesignon/latest/userguide/attributesforaccesscontrol.html)
+- [AWS CLI SSO configuration and dual-stack portal URLs](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-sso.html)
 - [Keycloak container setup](https://www.keycloak.org/server/containers)
 - [Keycloak release and published archive digest](https://github.com/keycloak/keycloak/releases/tag/26.7.4)
