@@ -3,6 +3,7 @@
 import argparse
 import base64
 import hashlib
+import http.client
 from html.parser import HTMLParser
 import http.cookiejar
 import json
@@ -10,6 +11,7 @@ import os
 from pathlib import Path
 import secrets
 import shutil
+import socket
 import ssl
 import subprocess
 import tarfile
@@ -23,7 +25,8 @@ STATE = ROOT / "artifacts/sso-idp"
 BUILD = ROOT / ".tools/keycloak-build"
 DOCKER_CONFIG = ROOT / ".tools/docker"
 REALM = "bedrock-cost-lab"
-BASE = "https://localhost:8843"
+HOST = "bedrock-idp.127.0.0.1.sslip.io"
+BASE = f"https://{HOST}:8843"
 CONTAINER = "bedrock-cost-lab-idp"
 VERSION = "26.7.4"
 IMAGE = f"bedrock-cost-lab-keycloak:{VERSION}"
@@ -46,10 +49,26 @@ def credentials():
     return json.loads((STATE / "credentials.json").read_text())
 
 
+class LoopbackHTTPSConnection(http.client.HTTPSConnection):
+    def connect(self):
+        if self.host != HOST or self.port != 8843 or self._tunnel_host:
+            raise ValueError("The lab client may connect only to its local IdP.")
+        self._create_connection = lambda address, timeout, source_address: socket.create_connection(
+            ("127.0.0.1", 8843), timeout, source_address
+        )
+        super().connect()
+
+
+class LoopbackHTTPSHandler(urllib.request.HTTPSHandler):
+    def https_open(self, req):
+        return self.do_open(LoopbackHTTPSConnection, req, context=self._context)
+
+
 def opener():
     context = ssl.create_default_context(cafile=STATE / "tls.crt")
     return urllib.request.build_opener(
-        urllib.request.HTTPSHandler(context=context),
+        urllib.request.ProxyHandler({}),
+        LoopbackHTTPSHandler(context=context),
         urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
     )
 
@@ -86,11 +105,19 @@ def prepare():
             "users": {key: {"username": user["username"], "password": secrets.token_urlsafe(24)}
                       for key, user in USERS.items()},
         }, indent=2) + "\n")
-    if not (STATE / "tls.crt").exists():
+    certificate = STATE / "tls.crt"
+    valid_certificate = certificate.exists() and all(
+        subprocess.run(
+            ["openssl", "x509", "-in", str(certificate), "-noout", *check],
+            capture_output=True,
+        ).returncode == 0
+        for check in (["-checkhost", HOST], ["-checkend", "86400"])
+    )
+    if not valid_certificate:
         subprocess.run([
             "openssl", "req", "-x509", "-newkey", "rsa:3072", "-sha256", "-nodes",
             "-days", "30", "-keyout", str(STATE / "tls.key"), "-out", str(STATE / "tls.crt"),
-            "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1",
+            "-subj", f"/CN={HOST}", "-addext", f"subjectAltName=DNS:{HOST}",
         ], check=True, capture_output=True)
         (STATE / "tls.key").chmod(0o600)
     (STATE / "data").mkdir(exist_ok=True, mode=0o700)
@@ -107,7 +134,7 @@ def prepare():
         raise RuntimeError("Unexpected source backend key; refusing to reuse another root's state.")
     private_write(ROOT / "sso-lab/local.backend.hcl",
                   backend.replace("bedrock-lab/terraform.tfstate", "sso-lab/terraform.tfstate"))
-    print("Prepared private credentials, localhost TLS, and SSO Terraform inputs.")
+    print(f"Prepared private credentials, TLS for {HOST}, and SSO Terraform inputs.")
 
 
 def build():
@@ -130,16 +157,27 @@ def build():
 
 
 def start():
+    certificate_digest = hashlib.sha256((STATE / "tls.crt").read_bytes()).hexdigest()
     found = docker("ps", "-a", "--filter", f"name=^/{CONTAINER}$", "--format", "{{.Names}}", capture=True)
     if found.stdout.strip():
-        label = docker("inspect", "--format", '{{index .Config.Labels "bedrock-cost-lab.component"}}',
-                       CONTAINER, capture=True).stdout.strip()
-        if label != "sso-idp":
+        current = json.loads(docker("inspect", CONTAINER, capture=True).stdout)[0]
+        labels = current["Config"]["Labels"]
+        if labels.get("bedrock-cost-lab.component") != "sso-idp":
             raise RuntimeError("An unrelated container already uses the lab name.")
-        docker("start", CONTAINER)
-        return
+        if (
+            f"--hostname={BASE}" in current["Config"]["Cmd"]
+            and labels.get("bedrock-cost-lab.tls-sha256") == certificate_digest
+        ):
+            docker("start", CONTAINER)
+            return
+        if not any(m["Source"] == str(STATE / "data") and m["Destination"] == "/opt/keycloak/data"
+                   for m in current["Mounts"]):
+            raise RuntimeError("Refusing to replace a container with an unexpected database mount.")
+        docker("stop", CONTAINER)
+        docker("rm", CONTAINER)
     docker(
         "run", "-d", "--name", CONTAINER, "--label", "bedrock-cost-lab.component=sso-idp",
+        "--label", f"bedrock-cost-lab.tls-sha256={certificate_digest}",
         "--publish", "127.0.0.1:8843:8443", "--memory", "2g", "--cpus", "2",
         "--user", f"{os.getuid()}:{os.getgid()}", "--env-file", str(STATE / "container.env"),
         "--volume", f"{STATE / 'data'}:/opt/keycloak/data:Z",

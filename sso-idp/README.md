@@ -60,17 +60,36 @@ signed response against the metadata certificate, verifies issuer, audience,
 NameID and attribute values, and saves only the non-secret result. It does not
 save SAML assertions or tokens.
 
-The IdP runs at `https://localhost:8843`, published on the host's loopback address
-only. It uses a generated localhost TLS certificate. For browser testing, trust
-this lab certificate or accept its local certificate warning. The scripts
-validate TLS against the generated certificate; verification is not disabled.
-Keep Keycloak running while using the AWS login flow.
+The IdP runs at `https://bedrock-idp.127.0.0.1.sslip.io:8843`, published on the
+host's loopback address only. This full DNS hostname replaces `localhost`, which
+was advertised by the metadata rejected by AWS with a URL-validation error.
+AWS acceptance of the replacement metadata must be checked in the console.
+
+The hostname resolves to `127.0.0.1` through sslip.io. If your resolver blocks
+loopback DNS responses, add the following entry to `/etc/hosts` on the machine
+running both Keycloak and the browser:
+
+```text
+127.0.0.1 bedrock-idp.127.0.0.1.sslip.io
+```
+
+It uses a generated TLS certificate for that hostname. For browser testing,
+trust this lab certificate or accept its local certificate warning. The scripts
+connect directly to loopback and validate the certificate and hostname;
+verification is not disabled. Keep Keycloak running during AWS login.
+
+To migrate an existing localhost setup, rerun `prepare`, `start`, `configure`,
+and `verify-logins`. `prepare` replaces a mismatched or expiring TLS certificate.
+`start` recreates only the lab container when its hostname or certificate changes,
+preserving its database, user passwords and SAML signing keys. Re-upload the
+newly generated metadata to AWS. If an AWS client was already configured, pass
+`--sp-metadata artifacts/sso-idp/aws-sp-metadata.xml` to `configure` again.
 
 Private local files are under ignored `artifacts/sso-idp/`:
 
 - `credentials.json`: generated administrator and test-user passwords.
 - `idp-metadata.xml`: the IdP metadata to upload to AWS.
-- `tls.crt` / `tls.key`: localhost TLS certificate and private key.
+- `tls.crt` / `tls.key`: local IdP TLS certificate and private key.
 - `data/`: persistent Keycloak database, including its signing keys.
 - `login-verification.json`: sanitized local login evidence.
 
