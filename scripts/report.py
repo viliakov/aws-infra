@@ -88,6 +88,8 @@ def export_rows(s3, bucket):
 
 
 def verify_callers(report, config):
+    if not config.get("callers"):
+        return ["Legacy caller validation requires the archived legacy test configuration."]
     missing = []
     for caller, expected in config["callers"].items():
         role_name = expected["arn"].rsplit("/", 1)[-1]
@@ -108,6 +110,8 @@ def verify_callers(report, config):
 
 
 def verify_session_run(report, config, events, run_id):
+    if not config.get("session_tag_callers"):
+        return ["Legacy session validation requires the archived legacy test configuration."]
     errors = []
     attempts = [
         event for event in events

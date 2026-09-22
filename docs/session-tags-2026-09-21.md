@@ -1,5 +1,11 @@
 # Session-tag experiment — 21 September 2026
 
+Update, 22 September: the delivered CUR report passed all eight exact-session
+and expected-tag checks. The legacy roles have since been retired; see
+[cleanup and preserved evidence](cleanup-2026-09-22.md). The remaining text records
+the experiment's original execution and initial billing wait.
+
+
 Status: inference succeeded; billing validation is pending CUR delivery.
 
 Terraform added the untagged `bedrock-cost-lab-session` IAM role and its

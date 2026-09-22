@@ -2,6 +2,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 spec = importlib.util.spec_from_file_location("lab", Path(__file__).parents[1] / "scripts/lab.py")
 lab = importlib.util.module_from_spec(spec)
@@ -9,6 +10,13 @@ spec.loader.exec_module(lab)
 
 
 class RequestBudgetTests(unittest.TestCase):
+    def test_sso_config_cannot_run_legacy_checks_or_inference(self):
+        with self.assertRaisesRegex(RuntimeError, "retired"):
+            lab.check(None, {})
+        for session_tags in (False, True):
+            with self.assertRaisesRegex(RuntimeError, "retired"):
+                lab.invoke(None, {}, SimpleNamespace(session_tags=session_tags))
+
     def test_failed_or_interrupted_requests_still_consume_the_daily_allowance(self):
         with tempfile.TemporaryDirectory() as directory:
             old_artifacts, old_ledger = lab.ARTIFACTS, lab.LEDGER

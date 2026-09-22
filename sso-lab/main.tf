@@ -38,6 +38,9 @@ locals {
   identity_store_id = try(one(data.aws_ssoadmin_instances.lab.identity_store_ids), null)
   ready             = local.instance_arn != null && local.identity_store_id != null
   users             = jsondecode(file("${path.module}/../sso-idp/users.json"))
+  runtime_model_id  = "openai.gpt-oss-20b-1:0"
+  mantle_model_id   = "openai.gpt-oss-20b"
+  mantle_project_id = "default"
 }
 
 resource "aws_identitystore_user" "lab" {
@@ -83,17 +86,17 @@ data "aws_iam_policy_document" "inference" {
   statement {
     sid       = "RuntimeModel"
     actions   = ["bedrock:InvokeModel"]
-    resources = ["arn:aws:bedrock:${var.region}::foundation-model/openai.gpt-oss-20b-1:0"]
+    resources = ["arn:aws:bedrock:${var.region}::foundation-model/${local.runtime_model_id}"]
   }
 
   statement {
     sid       = "MantleModel"
     actions   = ["bedrock-mantle:CreateInference"]
-    resources = ["arn:aws:bedrock-mantle:${var.region}:${var.member_account_id}:project/default"]
+    resources = ["arn:aws:bedrock-mantle:${var.region}:${var.member_account_id}:project/${local.mantle_project_id}"]
     condition {
       test     = "StringEquals"
       variable = "bedrock-mantle:Model"
-      values   = ["openai.gpt-oss-20b"]
+      values   = [local.mantle_model_id]
     }
   }
 }
@@ -122,12 +125,16 @@ resource "aws_ssoadmin_account_assignment" "lab" {
 
 output "sso_test_config" {
   value = {
-    instance_arn      = local.instance_arn
-    identity_store_id = local.identity_store_id
-    member_account_id = var.member_account_id
-    region            = var.region
-    permission_set    = try(aws_ssoadmin_permission_set.bedrock[0].name, null)
-    users             = local.users
+    management_account_id = var.management_account_id
+    runtime_model_id      = local.runtime_model_id
+    mantle_model_id       = local.mantle_model_id
+    mantle_project_id     = local.mantle_project_id
+    instance_arn          = local.instance_arn
+    identity_store_id     = local.identity_store_id
+    member_account_id     = var.member_account_id
+    region                = var.region
+    permission_set        = try(aws_ssoadmin_permission_set.bedrock[0].name, null)
+    users                 = local.users
   }
 
   precondition {

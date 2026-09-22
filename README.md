@@ -21,10 +21,10 @@ sandbox Keycloak realm.
 | `bootstrap/` | Encrypted, versioned S3 state bucket and TLS policy |
 | `account-access/` | Member-account Administrator role and the source user's grant to assume both admin roles |
 | `billing/` | Private EU report bucket, hourly CUR 2.0 export, member-account budget |
-| `bedrock-lab/` | Four role-tag callers and one shared session-tag caller, with model-scoped inference policies |
+| `bedrock-lab/` | Empty retirement root for removing the former STS test roles |
 | `billing-tags/` | Two IAM-principal tag activations, only if exposed by the billing API |
 | `sso-lab/` | Identity Center users, bounded permission set, attribute configuration, and account assignments |
-| `sso-idp/` | Local Keycloak test identity provider and synthetic user inventory |
+| `sso-idp/` | Sandbox Keycloak verification and synthetic user inventory |
 | `scripts/` | Configuration, bounded inference tests, billing inspection |
 | `tests/` | Request-budget and financial aggregation checks |
 
@@ -46,9 +46,8 @@ are locked. Terraform downloads should be checked against HashiCorp's published
 SHA256SUMS. No container or persistent AWS credential is required.
 
 Use a management-account profile that can assume `OrganizationAccountAccessRole`
-in the chosen member account. The test roles trust the management account's
-`Administrator` role; change `invoker_role_name` if your profile uses another role.
-The profile must resolve to that role when running inference.
+in the chosen member account. Administration uses that profile; inference uses
+the individual `lab-alice`, `lab-bob` or `lab-untagged` SSO profile.
 
 ```bash
 uv sync --locked
@@ -94,29 +93,24 @@ with the same backend configuration; do not bootstrap a second state.
 terraform -chdir=billing init -backend-config=local.backend.hcl
 terraform -chdir=billing plan -out=billing.tfplan
 terraform -chdir=billing apply billing.tfplan
-terraform -chdir=bedrock-lab init -backend-config=local.backend.hcl
-terraform -chdir=bedrock-lab plan -out=lab.tfplan
-terraform -chdir=bedrock-lab apply lab.tfplan
-mkdir -p artifacts
-terraform -chdir=bedrock-lab output -json test_config > artifacts/test-config.json
-uv run scripts/lab.py check
-uv run scripts/lab.py invoke --phase discovery
 ```
 
-Every root's provider rejects unexpected account IDs. Billing also verifies that
-the existing organization contains the selected member account. If a planned
-resource already exists outside this state, stop and explicitly import it after
-reviewing its owner and configuration.
+Complete the [sandbox SSO setup](sso-idp/README.md), including the personal
+Identity Center external-IdP connection, then apply the SSO root:
 
-The discovery batch makes eight calls: one Runtime Converse call and one Mantle
-Responses call for each role:
+```bash
+terraform -chdir=sso-lab init -backend-config=local.backend.hcl
+terraform -chdir=sso-lab plan -out=sso.tfplan
+terraform -chdir=sso-lab apply sso.tfplan
+mkdir -p artifacts
+umask 077
+terraform -chdir=sso-lab output -json sso_test_config > artifacts/test-config.json
+```
 
-| Caller | `owner` | `product` |
-| --- | --- | --- |
-| `alice-a` | `lab-alice` | `lab-product-a` |
-| `bob-a` | `lab-bob` | `lab-product-a` |
-| `alice-b` | `lab-alice` | `lab-product-b` |
-| `untagged` | absent | absent |
+The active test configuration now comes entirely from `sso-lab/`. Every root's
+provider rejects unexpected account IDs. Billing also verifies organization
+membership. Inspect ownership and explicitly import any existing unmanaged
+resource before adopting it.
 
 ## Console access to the member account
 
@@ -188,104 +182,48 @@ time. Override `principal_tag_api_keys = []` before first applying that root;
 do not activate similarly named Resource tags
 as a substitute.
 
-## Acceptance and reporting
+## SSO inference and reporting
 
-After both IAM-principal tags are Active, run Runtime and Mantle acceptance in
-**different UTC billing hours**, without discovery calls in those hours:
-
-```bash
-uv run scripts/lab.py invoke --phase acceptance --endpoint runtime
-```
-
-In a later UTC hour, run the same command with `--endpoint mantle`. CUR may
-aggregate calls to the same model without a distinct endpoint label; separate
-hours let us prove each endpoint's attribution independently.
-
-If activation was verified in the console but its status is not exposed by the
-API, add `--console-activation-confirmed`. Use this only after verifying both
-tags, not to bypass propagation. The ledger records that assertion.
-
-Cost Explorer can group the member-account costs by `iamPrincipal/owner` and
-`iamPrincipal/product`. CUR 2.0 includes `line_item_iam_principal` and the tags
-map because the export enables `INCLUDE_IAM_PRINCIPAL_DATA`.
-
-The export includes all selected member-account line items, preserving untagged
-usage, discounts, and provider billing variations. It overwrites each current
-report; S3 versioning preserves older versions. Report against the current objects,
-not every historical S3 version or a pile of old local downloads.
+Follow the [SSO runbook](sso-idp/README.md) to verify automatic SAML attributes,
+log in normally, and test each user's AWS identity. Then make bounded calls:
 
 ```bash
-REPORT_BUCKET=$(terraform -chdir=billing output -raw reports_bucket)
-uv run scripts/report.py --bucket "$REPORT_BUCKET" \
-  --start 2026-09-17T12:00:00Z --end 2026-09-17T13:00:00Z \
-  --verify-callers \
-  > artifacts/billing-summary.json
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-alice --user alice --endpoint runtime
 ```
 
-Replace the example interval with the actual UTC acceptance hour and run once
-per endpoint. `--verify-callers` fails until all four expected caller/tag
-combinations have positive usage in that window. The script
-reads compressed CSV from S3, preserves decimal cost precision, and keeps input
-and output usage units separate. CUR is hourly aggregation: request IDs from
-the local ledger are supporting evidence, not join keys in CUR.
-
-Acceptance requires delivered billing data, not just successful requests:
-
-- Each tagged caller appears with the intended principal owner and product.
-- Both Runtime and Mantle usage are covered.
-- The untagged control remains visible without fabricated owner/product values.
-- The grouped costs reconcile with the corresponding account usage. Treat credits
-  and taxes separately from usage charges.
-- Principal attribution and resource attribution are alternative views of the
-  same spend; never add their totals together.
-- Preserve activation time, inference evidence, report interval, and any missing
-  attribution. Do not promise retroactive coverage.
-
-Allow several days for discovery, activation, and export delivery. No scheduled
-inference loop is created.
-
-## Session-tag billing experiment
-
-The shared `bedrock-cost-lab-session` role has **no static tags**. Two sessions
-receive synthetic `owner` and `product` values directly in the STS request;
-a third receives no tags. A fourth caller uses the original statically tagged
-Alice role as a control. This tests session-tag billing independently of an
-identity provider. It does not provision SSO or test tag propagation.
-
-Apply the updated `bedrock-lab/` plan and refresh its output first:
+Repeat for Bob and the untagged control. Run Mantle tests in a separate UTC hour
+so reused SSO session names do not mix the two endpoint tests in billing reports.
+The permission set grants only the allowlisted model on each endpoint.
 
 ```bash
-terraform -chdir=bedrock-lab output -json test_config > artifacts/test-config.json
-uv run scripts/lab.py check
-uv run scripts/lab.py invoke --phase acceptance --session-tags --endpoint both
+uv run scripts/report.py --bucket YOUR_REPORT_BUCKET \
+  --start YYYY-MM-DDTHH:00:00Z --end YYYY-MM-DDTHH:00:00Z
 ```
 
-| Case | Static role tags | Session tags |
-| --- | --- | --- |
-| `session-alice` | None | `owner=lab-session-alice`, `product=lab-session-product-a` |
-| `session-bob` | None | `owner=lab-session-bob`, `product=lab-session-product-b` |
-| `session-untagged` | None | None |
-| `static-control` | `owner=lab-alice`, `product=lab-product-a` | None |
+Inspect the exact SSO caller ARNs and `iamPrincipal/owner` / `iamPrincipal/product`
+values. Successful SAML login or inference alone does not establish billing
+attribution; wait for delivered CUR records.
 
-The run makes eight calls, four per endpoint, under the existing daily cap.
-Every case/endpoint gets a unique session ARN recorded in the ledger, allowing
-both endpoints to run in one billing hour. Both principal keys must already be
-active. The role trust permits only the synthetic session tag keys and values.
+## Historical STS experiments
 
-Once CUR data arrives, use the printed run ID and its UTC billing-hour interval:
+The static-tag and direct-session caller roles are retired. Their declarations
+have been removed, so applying the retirement root cannot recreate them.
+`scripts/lab.py check` and `invoke` reject an SSO configuration rather than
+silently running zero test cases. Use `scripts/sso_probe.py` for current tests.
+
+Historical billing checks remain available with the archived configuration:
 
 ```bash
-uv run scripts/report.py --bucket "$REPORT_BUCKET" \
-  --start START_UTC_HOUR --end END_UTC_HOUR \
-  --verify-session-run RUN_ID > artifacts/session-billing-summary.json
+uv run scripts/report.py --bucket YOUR_REPORT_BUCKET \
+  --config artifacts/legacy/test-config.json \
+  --start 2026-09-21T08:00:00Z --end 2026-09-21T09:00:00Z \
+  --verify-session-run a00969c24622
 ```
 
-Verification requires all eight successful calls, each exact session ARN, and
-the expected tags on positive billed usage. Missing rows return exit code 2;
-they are not evidence that session tags are unsupported. If static control
-attribution works but delivered session-only calls have blank principal tags,
-record that difference and investigate it with AWS before promising SSO-based
-billing. A successful STS or Bedrock call alone does not prove billing support.
+The legacy report and invocation ledger are retained. That direct-session
+experiment passed its delivered billing checks before retirement; see the
+[cleanup record](docs/cleanup-2026-09-22.md).
 
 ## Checks and cleanup
 
@@ -297,11 +235,15 @@ uv run python -m unittest discover -s tests -v
 Run `terraform validate` in each initialized root, then inspect plans. After
 apply, run another plan to check for drift.
 
-Destroy only `bedrock-lab/` after the billing experiment. This removes its five
-roles and inline policies. Retain `account-access/`, `billing/`, `bootstrap/`, and tag activation
-state until the evidence is no longer needed. Buckets reject destruction in
-Terraform and cannot be force-emptied. The organization, accounts, and default
-Mantle project are never destroyed by this repository.
+`bedrock-lab/` is an empty retirement root. On an older deployment, review and
+apply its plan to remove only the five legacy caller roles and five inline
+policies. Archive its old output first and export the new SSO configuration as
+shown above. After cleanup, its plan should report no changes.
+
+Retain `sso-lab/`, `account-access/`, `billing/`, `bootstrap/`, and `billing-tags/`
+for ongoing SSO billing tests. Do not remove the Identity Center provisioned role,
+organization access role, billing data or AWS service-linked roles as part of
+this cleanup. The organization, accounts and Mantle default project remain.
 
 ## References
 

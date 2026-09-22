@@ -58,8 +58,8 @@ uv run scripts/sso_idp.py configure \
 uv run scripts/sso_idp.py verify-logins
 ```
 
-`prepare` stores the sandbox passwords in an ignored, mode-600 file and prepares
-SSO Terraform inputs. It does not generate new passwords or reuse the old Docker
+`scripts/configure.py` prepares SSO Terraform inputs and its independent backend.
+`prepare` checks those inputs and stores sandbox passwords in an ignored, mode-600 file. It does not generate new passwords or reuse the old Docker
 credentials. Once prepared, subsequent verification needs no KMS credentials.
 
 `configure` downloads the realm's public metadata. Its name is retained for
@@ -127,14 +127,17 @@ Use the portal URL displayed by your instance without changing its hostname.
 
 ## Apply AWS permissions through Terraform
 
-`prepare` generates the new root's ignored inputs and its own backend key using
-the existing lab configuration. It does not change the other roots' inputs.
+`scripts/configure.py` generates this root's ignored inputs and backend settings.
+The retired `bedrock-lab/` root is not a dependency of SSO setup or verification.
 
 ```bash
 AWS_PROFILE=personal-administrator terraform -chdir=sso-lab init \
   -backend-config=local.backend.hcl
 AWS_PROFILE=personal-administrator terraform -chdir=sso-lab plan -out=sso.tfplan
 AWS_PROFILE=personal-administrator terraform -chdir=sso-lab apply sso.tfplan
+umask 077
+AWS_PROFILE=personal-administrator terraform -chdir=sso-lab output -json sso_test_config \
+  > artifacts/test-config.json
 ```
 
 Review the plan before applying. Expected additions are three users, one

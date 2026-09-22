@@ -55,7 +55,7 @@ def main():
             "member_account_id": args.member_account_id,
             "budget_email": organization["MasterAccountEmail"],
         },
-        "bedrock-lab": {**common, "member_account_id": args.member_account_id},
+        "sso-lab": {**common, "member_account_id": args.member_account_id},
         "billing-tags": {"management_account_id": args.management_account_id},
         "account-access": {
             **common,

@@ -94,16 +94,9 @@ def prepare(passwords_sops=None):
             raise RuntimeError("SOPS decryption failed; check AWS_PROFILE and access to the repository KMS key.") from None
         values = validate_passwords(json.loads(result.stdout))
         private_write(STATE / "sandbox-passwords.json", json.dumps(values, indent=2) + "\n")
-    config = json.loads((ROOT / "artifacts/test-config.json").read_text())
-    private_write(ROOT / "sso-lab/local.auto.tfvars.json", json.dumps({
-        key: config[key] for key in ("management_account_id", "member_account_id", "region")
-    }, indent=2) + "\n")
-    backend = (ROOT / "bedrock-lab/local.backend.hcl").read_text()
-    if '"bedrock-lab/terraform.tfstate"' not in backend:
-        raise RuntimeError("Unexpected source backend key; refusing to reuse another root's state.")
-    private_write(ROOT / "sso-lab/local.backend.hcl",
-                  backend.replace("bedrock-lab/terraform.tfstate", "sso-lab/terraform.tfstate"))
-    print("Prepared SSO Terraform inputs" + (" and private sandbox passwords." if passwords_sops else "."))
+    if not all((ROOT / "sso-lab" / name).is_file() for name in ("local.auto.tfvars.json", "local.backend.hcl")):
+        raise ValueError("Run scripts/configure.py first to prepare the SSO Terraform inputs.")
+    print("SSO Terraform inputs are ready" + ("; loaded private sandbox passwords." if passwords_sops else "."))
 
 
 def service_provider(path):
@@ -233,7 +226,7 @@ def profiles(start_url):
         or any(character.isspace() or ord(character) < 32 for character in start_url)
     ):
         raise ValueError("Use the HTTPS AWS access portal URL shown by Identity Center.")
-    config = json.loads((ROOT / "artifacts/test-config.json").read_text())
+    config = json.loads((ROOT / "sso-lab/local.auto.tfvars.json").read_text())
     sections = []
     for key in USERS:
         sections.append(

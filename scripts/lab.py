@@ -96,6 +96,8 @@ def principal_tags_active(tags):
 
 
 def check(session, config):
+    if not config.get("callers"):
+        raise RuntimeError("Legacy STS callers are retired. Use scripts/sso_probe.py --identity-only.")
     member = assume(
         session,
         f"arn:aws:iam::{config['member_account_id']}:role/{config['member_access_role']}",
@@ -144,6 +146,9 @@ def check(session, config):
 
 
 def invoke(session, config, args):
+    callers = config.get("session_tag_callers" if args.session_tags else "callers", {})
+    if not callers:
+        raise RuntimeError("Legacy STS callers are retired. Use scripts/sso_probe.py for SSO inference.")
     if args.phase == "acceptance":
         if args.endpoint == "both" and not args.session_tags:
             raise RuntimeError("Use separate UTC billing hours for Runtime and Mantle acceptance.")
@@ -158,7 +163,6 @@ def invoke(session, config, args):
     failures = 0
     run_id = uuid.uuid4().hex[:12]
     print(f"Run ID: {run_id}", flush=True)
-    callers = config["session_tag_callers"] if args.session_tags else config["callers"]
     for key, caller in sorted(callers.items()):
         endpoints = ["runtime", "mantle"] if args.endpoint == "both" else [args.endpoint]
         for endpoint in endpoints:

@@ -8,6 +8,10 @@ spec.loader.exec_module(report)
 
 
 class SessionReportingTests(unittest.TestCase):
+    def test_sso_config_cannot_pass_empty_legacy_validation(self):
+        self.assertTrue(report.verify_callers({"groups": []}, {}))
+        self.assertTrue(report.verify_session_run({"groups": []}, {}, [], "test"))
+
     def experiment(self):
         callers = {
             "alice": {"arn": "arn:aws:iam::123456789012:role/shared", "tags": {},
