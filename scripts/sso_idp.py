@@ -152,62 +152,62 @@ def verify_logins():
     if metadata.attrib.get("entityID") != ISSUER:
         raise RuntimeError("Unexpected sandbox metadata issuer.")
     certs = [node.text.strip() for node in metadata.findall(".//d:X509Certificate", SAML)]
-    clients = {"preview": ("urn:bedrock-cost-lab:preview", [ISSUER + "/preview-acs"])}
-    if (STATE / "aws-sp-metadata.xml").exists():
-        clients["aws"] = service_provider(STATE / "aws-sp-metadata.xml")
+    sp_metadata = STATE / "aws-sp-metadata.xml"
+    if not sp_metadata.is_file():
+        raise ValueError("Download AWS service-provider metadata to artifacts/sso-idp/aws-sp-metadata.xml first.")
+    audience, destinations = service_provider(sp_metadata)
     credentials = passwords()
     evidence = []
     for key, user in USERS.items():
-        for client_name, (audience, destinations) in clients.items():
-            client = opener()
-            login = Form()
-            login.feed(request(ISSUER + f"/protocol/saml/clients/{client_name}", client=client).decode())
-            if not login.action:
-                raise RuntimeError(f"{key}: missing Keycloak login form.")
-            login.fields.update(username=user["username"], password=credentials[key])
-            posted = Form()
-            posted.feed(request(login.action, fields=login.fields, client=client).decode())
-            if posted.action not in destinations or "SAMLResponse" not in posted.fields:
-                raise RuntimeError(f"{key}/{client_name}: unexpected SAML destination or failed login.")
-            xml = base64.b64decode(posted.fields["SAMLResponse"])
-            verified = None
-            for cert in certs:
-                try:
-                    verified = XMLVerifier().verify(xml, x509_cert=cert).signed_xml
-                    break
-                except Exception:
-                    continue
-            if verified is None:
-                raise RuntimeError(f"{key}/{client_name}: SAML signature did not match the IdP metadata.")
-            if (
-                verified.attrib.get("Destination") != posted.action
-                or verified.findtext(".//s:Issuer", namespaces=SAML) != ISSUER
-                or verified.findtext(".//s:Audience", namespaces=SAML) != audience
-                or verified.findtext(".//s:NameID", namespaces=SAML) != user["username"]
-            ):
-                raise RuntimeError(f"{key}/{client_name}: unexpected signed identity, destination or audience.")
-            conditions = verified.find(".//s:Conditions", SAML)
-            now = datetime.now(timezone.utc)
-            if conditions is None or not (
-                datetime.fromisoformat(conditions.attrib["NotBefore"]) <= now
-                < datetime.fromisoformat(conditions.attrib["NotOnOrAfter"])
-            ):
-                raise RuntimeError(f"{key}/{client_name}: assertion is outside its validity interval.")
-            actual = {}
-            for node in verified.findall(".//s:Attribute", SAML):
-                name = node.attrib["Name"]
-                if not name.startswith(ACCESS_CONTROL):
-                    continue
-                name = name.removeprefix(ACCESS_CONTROL)
-                values = node.findall("s:AttributeValue", SAML)
-                if name in actual or len(values) != 1:
-                    raise RuntimeError(f"{key}/{client_name}: ambiguous attribution attribute.")
-                actual[name] = values[0].text
-            if actual != user["attributes"]:
-                raise RuntimeError(f"{key}/{client_name}: unexpected automatic SAML attributes.")
+        client = opener()
+        login = Form()
+        login.feed(request(ISSUER + "/protocol/saml/clients/aws", client=client).decode())
+        if not login.action:
+            raise RuntimeError(f"{key}: missing Keycloak login form.")
+        login.fields.update(username=user["username"], password=credentials[key])
+        posted = Form()
+        posted.feed(request(login.action, fields=login.fields, client=client).decode())
+        if posted.action not in destinations or "SAMLResponse" not in posted.fields:
+            raise RuntimeError(f"{key}/aws: unexpected SAML destination or failed login.")
+        xml = base64.b64decode(posted.fields["SAMLResponse"])
+        verified = None
+        for cert in certs:
+            try:
+                verified = XMLVerifier().verify(xml, x509_cert=cert).signed_xml
+                break
+            except Exception:
+                continue
+        if verified is None:
+            raise RuntimeError(f"{key}/aws: SAML signature did not match the IdP metadata.")
+        if (
+            verified.attrib.get("Destination") != posted.action
+            or verified.findtext(".//s:Issuer", namespaces=SAML) != ISSUER
+            or verified.findtext(".//s:Audience", namespaces=SAML) != audience
+            or verified.findtext(".//s:NameID", namespaces=SAML) != user["username"]
+        ):
+            raise RuntimeError(f"{key}/aws: unexpected signed identity, destination or audience.")
+        conditions = verified.find(".//s:Conditions", SAML)
+        now = datetime.now(timezone.utc)
+        if conditions is None or not (
+            datetime.fromisoformat(conditions.attrib["NotBefore"]) <= now
+            < datetime.fromisoformat(conditions.attrib["NotOnOrAfter"])
+        ):
+            raise RuntimeError(f"{key}/aws: assertion is outside its validity interval.")
+        actual = {}
+        for node in verified.findall(".//s:Attribute", SAML):
+            name = node.attrib["Name"]
+            if not name.startswith(ACCESS_CONTROL):
+                continue
+            name = name.removeprefix(ACCESS_CONTROL)
+            values = node.findall("s:AttributeValue", SAML)
+            if name in actual or len(values) != 1:
+                raise RuntimeError(f"{key}/aws: ambiguous attribution attribute.")
+            actual[name] = values[0].text
+        if actual != user["attributes"]:
+            raise RuntimeError(f"{key}/aws: unexpected automatic SAML attributes.")
         evidence.append({
             "user": key, "name_id": user["username"], "attributes": user["attributes"],
-            "issuer": ISSUER, "clients_verified": list(clients), "signature_verified": True,
+            "issuer": ISSUER, "clients_verified": ["aws"], "signature_verified": True,
         })
     private_write(STATE / "login-verification.json", json.dumps(evidence, indent=2) + "\n")
     print(json.dumps(evidence, indent=2))

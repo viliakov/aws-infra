@@ -69,8 +69,8 @@ Terraform configuration if AWS's entity ID or ACS URLs change.
 
 `verify-logins` performs password logins for all three users. It verifies signed
 issuer, destination, audience, NameID, assertion lifetime and exact attributes.
-When AWS SP metadata is present, both preview and AWS clients are checked (six
-logins); otherwise only preview is checked. It captures SAML forms without
+AWS SP metadata is required. Only the real AWS client is checked (three logins);
+there is no separate preview client. The verifier captures SAML forms without
 submitting them to AWS, so this does not establish an AWS session or prove billing.
 
 Private local files remain under ignored `artifacts/sso-idp/`:
