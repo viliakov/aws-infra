@@ -37,7 +37,7 @@ one directory mapping. Keeping that key distinct preserves `owner`/`product`
 from the SAML assertion. `labSubject` is not activated for cost allocation.
 The control user has no owner/product attribution, although it has `labSubject`.
 
-## Prepare and verify sandbox Keycloak
+## Prepare sandbox Keycloak metadata
 
 The active IdP is the separate `bedrock-cost-lab` realm at
 `https://sso.sandbox-main.sandbox.stackstate.io`. Its users, attributes, SAML
@@ -46,34 +46,28 @@ clients and permissions are managed through Terraform in
 The helper uses normal HTTPS certificate validation and only submits login forms.
 It has no Docker commands or Keycloak administration calls.
 
-Obtain the encrypted password file from the applied Terraform revision, then run
-from this repository root with credentials allowed to decrypt its SOPS/KMS key:
+First complete the repository's `scripts/configure.py` setup to generate the
+SSO Terraform inputs and backend settings. Obtain the encrypted password file
+from the applied Terraform revision, then run from this repository root with
+credentials allowed to decrypt its SOPS/KMS key:
 
 ```bash
 uv sync --locked
 AWS_PROFILE=stackstate-infosec uv run scripts/sso_idp.py prepare \
   --passwords-sops /path/to/terraform-infra/keycloak/sandbox-main/secrets/sops.bedrock_cost_lab_passwords.json
-uv run scripts/sso_idp.py configure \
-  --sp-metadata artifacts/sso-idp/aws-sp-metadata.xml
-uv run scripts/sso_idp.py verify-logins
+uv run scripts/sso_idp.py configure
 ```
 
-`scripts/configure.py` prepares SSO Terraform inputs and its independent backend.
-`prepare` checks those inputs and stores sandbox passwords in an ignored, mode-600 file. It does not generate new passwords or reuse the old Docker
+`prepare` checks those inputs and stores sandbox passwords in an ignored,
+mode-600 file. It does not generate new passwords or reuse the old Docker
 credentials. Once prepared, subsequent verification needs no KMS credentials.
 
-`configure` downloads the realm's public metadata. Its name is retained for
-existing commands, but it does not modify Keycloak. An optional `--sp-metadata`
-records the AWS metadata used for client verification; update the owning
-Terraform configuration if AWS's entity ID or ACS URLs change.
+`configure` downloads the realm's public metadata to
+`artifacts/sso-idp/idp-metadata.xml`; it does not modify Keycloak.
+**This download does not require AWS SP metadata.** Obtain that second file
+in the console step below, then verify logins.
 
-`verify-logins` performs password logins for all three users. It verifies signed
-issuer, destination, audience, NameID, assertion lifetime and exact attributes.
-AWS SP metadata is required. Only the real AWS client is checked (three logins);
-there is no separate preview client. The verifier captures SAML forms without
-submitting them to AWS, so this does not establish an AWS session or prove billing.
-
-Private local files remain under ignored `artifacts/sso-idp/`:
+The following steps store local files under ignored `artifacts/sso-idp/`:
 
 - `sandbox-passwords.json`: the three sandbox passwords, keyed by user name.
 - `idp-metadata.xml`: sandbox metadata to upload to AWS.
@@ -110,16 +104,40 @@ In the **personal management account**, select **Frankfurt (`eu-central-1`)**:
 
 No passwords or private signing keys need to be uploaded to AWS.
 
-Download IdP metadata and record the AWS service provider for verification:
+## Verify sandbox SAML responses and prepare CLI profiles
+
+At this point, both metadata files must exist: `idp-metadata.xml` was downloaded
+from Keycloak, and `aws-sp-metadata.xml` was downloaded from AWS.
+
+The sandbox AWS client is managed by Terraform. Its entity ID and
+assertion-consumer (ACS) URLs must match the downloaded AWS metadata. For a new
+Identity Center instance, or changed URLs, update and apply the owning
+`terraform-infra/keycloak/sandbox-main` configuration through its reviewed
+workflow before continuing. The helper does not configure that client.
+
+If you saved the AWS download elsewhere, import it first:
 
 ```bash
 uv run scripts/sso_idp.py configure \
-  --sp-metadata artifacts/sso-idp/aws-sp-metadata.xml
+  --sp-metadata /path/to/downloaded/aws-sp-metadata.xml
+```
+
+This optional argument validates the file and copies it to
+`artifacts/sso-idp/aws-sp-metadata.xml`. Skip this import if you already saved it
+there. The command also refreshes the independent Keycloak metadata download.
+
+Now verify the SAML responses and generate profiles using the recorded portal URL:
+
+```bash
+uv run scripts/sso_idp.py verify-logins
 uv run scripts/sso_idp.py profiles --start-url YOUR_AWS_ACCESS_PORTAL_URL
 ```
 
-The sandbox AWS client is already managed by Terraform. Verification compares
-its signed responses with the supplied AWS entity ID and assertion-consumer URLs.
+`verify-logins` performs password logins for all three users. It verifies signed
+issuer, destination, audience, NameID, assertion lifetime and exact attributes
+against the metadata. Only the real AWS client is checked (three logins).
+The verifier captures SAML forms without submitting them to AWS, so this does
+not establish an AWS session or prove billing.
 
 The profile generator accepts both legacy `https://your-company.awsapps.com/start`
 URLs and dual-stack `https://ssoins-INSTANCE.portal.REGION.app.aws` URLs.
