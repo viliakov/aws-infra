@@ -179,6 +179,42 @@ AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
 AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
   uv run scripts/sso_probe.py --profile lab-alice --user alice \
   --endpoint runtime --identity-only
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-bob --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-bob --user bob \
+  --endpoint runtime --identity-only
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-untagged --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-untagged --user untagged \
+  --endpoint runtime --identity-only
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-alice --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-alice --user alice \
+  --endpoint mantle --identity-only
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-bob --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-bob --user bob \
+  --endpoint mantle --identity-only
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-untagged --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-untagged --user untagged \
+  --endpoint mantle --identity-only
+
 ```
 
 Repeat for `lab-bob`/`bob` and `lab-untagged`/`untagged`. These commands use a
@@ -195,11 +231,66 @@ name can be reused across requests, so separate hours make endpoint attribution
 unambiguous. The shared daily ledger still caps all lab inference attempts at
 24, with at most 128 output tokens per call.
 
+```bash
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-alice --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-alice --user alice \
+  --endpoint runtime
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-bob --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-bob --user bob \
+  --endpoint runtime
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-untagged --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-untagged --user untagged \
+  --endpoint runtime
+
+# Mantle
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-alice --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-alice --user alice \
+  --endpoint mantle
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-bob --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-bob --user bob \
+  --endpoint mantle
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  aws sso login --profile lab-untagged --use-device-code --no-browser
+
+AWS_CONFIG_FILE="$PWD/artifacts/sso-idp/aws-config" \
+  uv run scripts/sso_probe.py --profile lab-untagged --user untagged \
+  --endpoint mantle
+
+```
+
 Use `scripts/report.py` for each interval and inspect the users' exact caller
 ARNs and `iamPrincipal/owner` / `iamPrincipal/product` values. The existing
 `--verify-session-run` option applies to the earlier direct STS experiment, not
 these SSO logins. Successful login and inference do not prove billed attribution;
 wait for delivered CUR data.
+
+For example,
+```
+uv run scripts/report.py --bucket aws-infra-state-606355870348-eu-central-1 \
+  --start 2026-09-22T14:00:00Z --end 2026-09-22T15:00:00Z
+
+uv run scripts/report.py --bucket aws-infra-state-606355870348-eu-central-1 \
+  --start 2026-09-22T15:00:00Z --end 2026-09-22T16:00:00Z
+```
 
 ## Cleanup
 
